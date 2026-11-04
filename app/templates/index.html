@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Список задач</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/95css@0.4.2/css/95css.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/app.css">
+  </head>
+  <body{% if current_user %} data-login="{{ current_user.login }}"{% endif %}>
+    <main class="screen">
+      <section class="win" id="window-new-task" data-window="new-task">
+        <div class="win-title">
+          <span class="win-title-text">Новая задача</span>
+          <div class="win-controls">
+            <button type="button" class="win-control" data-action="minimize" aria-label="Свернуть"></button>
+            <button type="button" class="win-control" data-action="maximize" aria-label="Развернуть"></button>
+            <button type="button" class="win-control" data-action="close" aria-label="Закрыть"></button>
+          </div>
+        </div>
+        <div class="win-body">
+          <form id="add-form" method="post" action="/tasks">
+            <div class="field-group">
+              <div class="input-wrap">
+                <input id="title" name="title" type="text" maxlength="200" autocomplete="off" required aria-label="Новая задача" aria-describedby="field-tip-text">
+                <span id="pixel-caret" class="pixel-caret" hidden></span>
+              </div>
+              <div class="add-row">
+                <button type="submit">Добавить</button>
+              </div>
+              <div id="field-tip" class="field-tip" hidden role="tooltip">
+                <div id="field-tip-title" class="field-tip-title"></div>
+                <p id="field-tip-text" class="field-tip-text"></p>
+              </div>
+            </div>
+          </form>
+          <p id="error" class="error" role="alert"{% if not error %} hidden{% endif %}>{{ error or "" }}</p>
+        </div>
+      </section>
+      <section class="win" id="window-task-list" data-window="task-list">
+        <div class="win-title">
+          <span class="win-title-text">Список задач</span>
+          <div class="win-controls">
+            <button type="button" class="win-control" data-action="minimize" aria-label="Свернуть"></button>
+            <button type="button" class="win-control" data-action="maximize" aria-label="Развернуть"></button>
+            <button type="button" class="win-control" data-action="close" aria-label="Закрыть"></button>
+          </div>
+        </div>
+        <div class="win-body">
+          {% if tasks %}
+          <ul id="task-list" class="task-list">
+            {% for task in tasks %}
+            <li class="task-item{% if task.done %} done{% endif %}" data-id="{{ task.id }}">
+              <form class="edit-slot" method="post" action="/tasks/{{ task.id }}/edit" hidden>
+                <input class="edit-title" name="title" type="text" maxlength="200" value="{{ task.title }}" aria-label="Изменить задачу" autocomplete="off">
+              </form>
+              <div class="task-row">
+              <form class="toggle-form" method="post" action="/tasks/{{ task.id }}/toggle">
+                <label class="checkbox">
+                  <input type="checkbox" {% if task.done %}checked{% endif %}>
+                  <span class="task-title">{{ task.title }}</span>
+                </label>
+                <button type="button" class="edit-button">Изменить</button>
+              </form>
+              <form class="delete-form" method="post" action="/tasks/{{ task.id }}/delete">
+                <button type="submit">Удалить</button>
+              </form>
+              </div>
+            </li>
+            {% endfor %}
+          </ul>
+          <p id="empty" hidden>Список пуст.</p>
+          {% else %}
+          <ul id="task-list" class="task-list" hidden></ul>
+          <p id="empty">Список пуст.</p>
+          {% endif %}
+          <p id="status-count">Задач: {{ tasks|length }}</p>
+        </div>
+      </section>
+    </main>
+    <div class="taskbar" aria-label="Панель задач">
+      <button type="button" class="taskbar-button is-active" data-target="window-new-task">Новая задача</button>
+      <button type="button" class="taskbar-button is-active" data-target="window-task-list">Список задач</button>
+    </div>
+    <div id="profile-button" class="profile-icon" role="button" tabindex="0" aria-label="Профиль" title="Профиль">
+      <img src="/static/profile-icon.png?v=3" class="profile-img" alt="" width="72" height="72">
+      <span class="profile-caption">Профиль</span>
+    </div>
+    <div id="account-modal" class="account-modal" hidden>
+      <div class="account-backdrop" data-close="true"></div>
+      <div class="win account-window is-active" role="dialog" aria-modal="true" aria-labelledby="account-title">
+        <div class="win-title" id="account-title">Вход</div>
+        <div class="win-body">
+          <form id="login-form">
+            <div class="field-group">
+              <label for="login-name">Логин</label>
+              <input id="login-name" name="login" type="text" maxlength="32" autocomplete="username" required>
+              <label for="login-password">Пароль</label>
+              <input id="login-password" name="password" type="password" maxlength="128" autocomplete="current-password" required>
+              <div class="account-actions">
+                <button type="submit">Войти</button>
+                <button type="button" id="show-register">Зарегистрироваться</button>
+              </div>
+            </div>
+          </form>
+          <form id="register-form" hidden>
+            <div class="field-group">
+              <label for="register-name">Логин</label>
+              <input id="register-name" name="login" type="text" maxlength="32" autocomplete="username" required>
+              <label for="register-password">Пароль</label>
+              <input id="register-password" name="password" type="password" maxlength="128" autocomplete="new-password" required>
+              <div class="account-actions">
+                <button type="submit">Зарегистрироваться</button>
+              </div>
+            </div>
+          </form>
+          <div id="cabinet-view" hidden>
+            <p class="cabinet-line">Логин: <span id="cabinet-login"></span></p>
+            <div class="account-actions cabinet-actions">
+              <button type="button" id="logout-button">Выйти</button>
+            </div>
+          </div>
+          <p id="account-error" class="error" role="alert" hidden></p>
+        </div>
+      </div>
+    </div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
