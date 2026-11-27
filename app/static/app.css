@@ -577,12 +577,14 @@ label.checkbox input[type="checkbox"] {
 
 .account-actions.cabinet-actions {
   width: 100%;
+  flex-wrap: wrap;
   justify-content: center;
 }
 
 @media (max-width: 520px) {
   #login-form:not([hidden]) .account-actions,
-  #register-form:not([hidden]) .account-actions {
+  #register-form:not([hidden]) .account-actions,
+  #cabinet-view:not([hidden]) .account-actions {
     flex-direction: column;
     align-items: center;
     width: 100%;

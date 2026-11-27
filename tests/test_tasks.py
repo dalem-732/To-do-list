@@ -76,7 +76,7 @@ def test_reject_long_title_and_control_characters(client: TestClient) -> None:
 
 
 def test_escapes_html_in_title(client: TestClient) -> None:
-    client.post("/tasks", data={"title": '<script>alert(1)</script>'}, follow_redirects=True)
+    client.post("/tasks", data={"title": "<script>alert(1)</script>"}, follow_redirects=True)
     page = client.get("/")
     assert "<script>alert" not in page.text
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in page.text
@@ -133,17 +133,23 @@ def test_health(client: TestClient) -> None:
 
 def test_security_headers_and_body_limit(client: TestClient) -> None:
     page = client.get("/")
-    assert 'href="https://cdn.jsdelivr.net/npm/95css@0.4.2/css/95css.min.css"' in page.text
-    assert "family=Press+Start+2P" in page.text
+    assert "cdn.jsdelivr.net" not in page.text
+    assert "fonts.googleapis.com" not in page.text
+    assert "/static/vendor/95css/95css.min.css?v=" in page.text
+    assert "/static/vendor/press-start-2p/press-start-2p.css?v=" in page.text
     policy = page.headers["content-security-policy"]
     assert "default-src 'self'" in policy
-    assert "https://cdn.jsdelivr.net" in policy
-    assert "https://fonts.gstatic.com" in policy
+    assert "https://" not in policy
+    assert page.headers["cache-control"] == "no-store"
     assert page.headers["x-content-type-options"] == "nosniff"
     assert page.headers["x-frame-options"] == "DENY"
     assert page.headers["referrer-policy"] == "no-referrer"
 
-    oversized = client.post("/tasks", content=b"title=" + b"a" * 9000, headers={"Content-Type": "application/x-www-form-urlencoded"})
+    oversized = client.post(
+        "/tasks",
+        content=b"title=" + b"a" * 9000,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
     assert oversized.status_code == 413
 
 
@@ -178,21 +184,30 @@ def test_schema_migration_is_recorded(client: TestClient) -> None:
         versions = set(session.scalars(text("SELECT version FROM schema_migrations")))
     finally:
         session.close()
-    assert "001_current_schema" in versions
+    assert {"001_current_schema", "002_user_sessions"} <= versions
 
 
-def test_client_ip_only_trusts_known_proxy_headers(monkeypatch) -> None:
+def test_client_ip_ignores_spoofable_headers_by_default(monkeypatch) -> None:
     from app.security import client_ip
 
-    monkeypatch.delenv("TRUST_PROXY_HEADERS", raising=False)
+    for name in ("TRUST_PROXY_HEADERS", "RAILWAY_ENVIRONMENT_ID", "RAILWAY_PROJECT_ID", "RAILWAY_SERVICE_ID"):
+        monkeypatch.delenv(name, raising=False)
     scope = {
-        "headers": [(b"x-forwarded-for", b"198.51.100.9")],
+        "headers": [
+            (b"x-forwarded-for", b"198.51.100.9"),
+            (b"x-railway-edge", b"fra1"),
+            (b"x-real-ip", b"203.0.113.7"),
+        ],
         "client": ("127.0.0.1", 1234),
     }
     assert client_ip(scope) == "127.0.0.1"
 
-    scope["headers"] = [
-        (b"x-railway-edge", b"fra1"),
-        (b"x-real-ip", b"203.0.113.7"),
-    ]
+    monkeypatch.setenv("RAILWAY_PROJECT_ID", "project")
     assert client_ip(scope) == "203.0.113.7"
+
+    monkeypatch.setenv("TRUST_PROXY_HEADERS", "0")
+    assert client_ip(scope) == "127.0.0.1"
+
+    monkeypatch.setenv("TRUST_PROXY_HEADERS", "1")
+    scope["headers"] = [(b"x-forwarded-for", b"10.0.0.1, 198.51.100.9")]
+    assert client_ip(scope) == "198.51.100.9"

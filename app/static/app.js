@@ -72,6 +72,31 @@
         });
         updateCount();
       });
+    }).catch(function () {
+      showError("Не удалось загрузить задачи.");
+    });
+  }
+
+  function toggleTask(form) {
+    var item = form.closest(".task-item");
+    var checkbox = form.querySelector('input[type="checkbox"]');
+    var previous = item.classList.contains("done");
+    return fetch(form.action, {
+      method: "POST",
+      headers: { Accept: "application/json" }
+    }).then(function (response) {
+      if (!response.ok) {
+        checkbox.checked = previous;
+        return detailFrom(response).then(showError);
+      }
+      return response.json().then(function (task) {
+        showError("");
+        checkbox.checked = task.done;
+        item.classList.toggle("done", task.done);
+      });
+    }).catch(function () {
+      checkbox.checked = previous;
+      showError("Не удалось выполнить действие.");
     });
   }
 
@@ -86,70 +111,19 @@
     );
   }
 
+  var rowTemplate = document.getElementById("task-row-template");
+
   function taskRow(task) {
-    var item = document.createElement("li");
-    item.className = "task-item" + (task.done ? " done" : "");
+    var item = rowTemplate.content.firstElementChild.cloneNode(true);
+    var base = "/tasks/" + encodeURIComponent(task.id);
     item.dataset.id = task.id;
-
-    var editSlot = document.createElement("form");
-    editSlot.className = "edit-slot";
-    editSlot.method = "post";
-    editSlot.action = "/tasks/" + task.id + "/edit";
-    editSlot.hidden = true;
-
-    var editInput = document.createElement("input");
-    editInput.className = "edit-title";
-    editInput.name = "title";
-    editInput.type = "text";
-    editInput.maxLength = 200;
-    editInput.setAttribute("aria-label", "Изменить задачу");
-    editInput.autocomplete = "off";
-    editInput.value = task.title;
-    editSlot.appendChild(editInput);
-
-    var row = document.createElement("div");
-    row.className = "task-row";
-
-    var toggleForm = document.createElement("form");
-    toggleForm.className = "toggle-form";
-    toggleForm.method = "post";
-    toggleForm.action = "/tasks/" + task.id + "/toggle";
-
-    var checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = Boolean(task.done);
-
-    var title = document.createElement("span");
-    title.className = "task-title";
-    title.textContent = task.title;
-
-    var label = document.createElement("label");
-    label.className = "checkbox";
-    label.appendChild(checkbox);
-    label.appendChild(title);
-
-    var editButton = document.createElement("button");
-    editButton.type = "button";
-    editButton.className = "edit-button";
-    editButton.textContent = "Изменить";
-
-    toggleForm.appendChild(label);
-    toggleForm.appendChild(editButton);
-
-    var deleteForm = document.createElement("form");
-    deleteForm.className = "delete-form";
-    deleteForm.method = "post";
-    deleteForm.action = "/tasks/" + task.id + "/delete";
-
-    var remove = document.createElement("button");
-    remove.type = "submit";
-    remove.textContent = "Удалить";
-    deleteForm.appendChild(remove);
-
-    row.appendChild(toggleForm);
-    row.appendChild(deleteForm);
-    item.appendChild(editSlot);
-    item.appendChild(row);
+    item.classList.toggle("done", Boolean(task.done));
+    item.querySelector(".edit-slot").action = base + "/edit";
+    item.querySelector(".edit-title").value = task.title;
+    item.querySelector(".toggle-form").action = base + "/toggle";
+    item.querySelector('input[type="checkbox"]').checked = Boolean(task.done);
+    item.querySelector(".task-title").textContent = task.title;
+    item.querySelector(".delete-form").action = base + "/delete";
     return item;
   }
 
@@ -245,26 +219,7 @@
     if (!input || input.type !== "checkbox" || !input.form || !input.form.classList.contains("toggle-form")) {
       return;
     }
-    var form = input.form;
-    var item = form.closest(".task-item");
-    var previous = !input.checked;
-    fetch(form.action, {
-      method: "POST",
-      headers: { Accept: "application/json" }
-    }).then(function (response) {
-      if (!response.ok) {
-        input.checked = previous;
-        return detailFrom(response).then(showError);
-      }
-      return response.json().then(function (task) {
-        showError("");
-        input.checked = task.done;
-        item.classList.toggle("done", task.done);
-      });
-    }).catch(function () {
-      input.checked = previous;
-      showError("Не удалось выполнить действие.");
-    });
+    toggleTask(input.form);
   });
 
   document.addEventListener("submit", function (event) {
@@ -297,7 +252,12 @@
       });
       return;
     }
-    if (!form.classList.contains("delete-form") && !form.classList.contains("toggle-form")) {
+    if (form.classList.contains("toggle-form")) {
+      event.preventDefault();
+      toggleTask(form);
+      return;
+    }
+    if (!form.classList.contains("delete-form")) {
       return;
     }
     event.preventDefault();
@@ -309,17 +269,8 @@
         return detailFrom(response).then(showError);
       }
       showError("");
-      if (form.classList.contains("delete-form")) {
-        form.closest(".task-item").remove();
-        updateCount();
-        return;
-      }
-      return response.json().then(function (task) {
-        var item = form.closest(".task-item");
-        var checkbox = form.querySelector('input[type="checkbox"]');
-        checkbox.checked = task.done;
-        item.classList.toggle("done", task.done);
-      });
+      form.closest(".task-item").remove();
+      updateCount();
     }).catch(function () {
       showError("Не удалось выполнить действие.");
     });
@@ -708,8 +659,11 @@
     });
   });
 
-  document.getElementById("logout-button").addEventListener("click", function () {
-    fetch("/auth/logout", { method: "POST", headers: { Accept: "application/json" } }).then(function () {
+  function signOut(url) {
+    fetch(url, { method: "POST", headers: { Accept: "application/json" } }).then(function (response) {
+      if (!response.ok) {
+        return detailFrom(response).then(showAccountError);
+      }
       currentLogin = "";
       delete document.body.dataset.login;
       loginForm.reset();
@@ -717,6 +671,16 @@
       showAccountState("login");
       resetWindows();
       reloadTasks();
+    }).catch(function () {
+      showAccountError("Не удалось выполнить действие.");
     });
+  }
+
+  document.getElementById("logout-button").addEventListener("click", function () {
+    signOut("/auth/logout");
+  });
+
+  document.getElementById("logout-all-button").addEventListener("click", function () {
+    signOut("/auth/logout-all");
   });
 })();

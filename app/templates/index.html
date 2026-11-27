@@ -1,14 +1,31 @@
+{% macro task_row(task_id, title, done) -%}
+<li class="task-item{% if done %} done{% endif %}" data-id="{{ task_id }}">
+  <form class="edit-slot" method="post" action="/tasks/{{ task_id }}/edit" hidden>
+    <input class="edit-title" name="title" type="text" maxlength="200" value="{{ title }}" aria-label="Изменить задачу" autocomplete="off">
+  </form>
+  <div class="task-row">
+    <form class="toggle-form" method="post" action="/tasks/{{ task_id }}/toggle">
+      <label class="checkbox">
+        <input type="checkbox" {% if done %}checked{% endif %}>
+        <span class="task-title">{{ title }}</span>
+      </label>
+      <button type="button" class="edit-button">Изменить</button>
+    </form>
+    <form class="delete-form" method="post" action="/tasks/{{ task_id }}/delete">
+      <button type="submit">Удалить</button>
+    </form>
+  </div>
+</li>
+{%- endmacro %}
 <!DOCTYPE html>
 <html lang="ru">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Список задач</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/95css@0.4.2/css/95css.min.css">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/app.css">
+    <link rel="stylesheet" href="{{ static_url('vendor/95css/95css.min.css') }}">
+    <link rel="stylesheet" href="{{ static_url('vendor/press-start-2p/press-start-2p.css') }}">
+    <link rel="stylesheet" href="{{ static_url('app.css') }}">
   </head>
   <body{% if current_user %} data-login="{{ current_user.login }}"{% endif %}>
     <main class="screen">
@@ -53,23 +70,7 @@
           {% if tasks %}
           <ul id="task-list" class="task-list">
             {% for task in tasks %}
-            <li class="task-item{% if task.done %} done{% endif %}" data-id="{{ task.id }}">
-              <form class="edit-slot" method="post" action="/tasks/{{ task.id }}/edit" hidden>
-                <input class="edit-title" name="title" type="text" maxlength="200" value="{{ task.title }}" aria-label="Изменить задачу" autocomplete="off">
-              </form>
-              <div class="task-row">
-              <form class="toggle-form" method="post" action="/tasks/{{ task.id }}/toggle">
-                <label class="checkbox">
-                  <input type="checkbox" {% if task.done %}checked{% endif %}>
-                  <span class="task-title">{{ task.title }}</span>
-                </label>
-                <button type="button" class="edit-button">Изменить</button>
-              </form>
-              <form class="delete-form" method="post" action="/tasks/{{ task.id }}/delete">
-                <button type="submit">Удалить</button>
-              </form>
-              </div>
-            </li>
+            {{ task_row(task.id, task.title, task.done) }}
             {% endfor %}
           </ul>
           <p id="empty" hidden>Список пуст.</p>
@@ -86,7 +87,7 @@
       <button type="button" class="taskbar-button is-active" data-target="window-task-list">Список задач</button>
     </div>
     <div id="profile-button" class="profile-icon" role="button" tabindex="0" aria-label="Профиль" title="Профиль">
-      <img src="/static/profile-icon.png?v=3" class="profile-img" alt="" width="72" height="72">
+      <img src="{{ static_url('profile-icon.png') }}" class="profile-img" alt="" width="72" height="72">
       <span class="profile-caption">Профиль</span>
     </div>
     <div id="account-modal" class="account-modal" hidden>
@@ -121,12 +122,14 @@
             <p class="cabinet-line">Логин: <span id="cabinet-login"></span></p>
             <div class="account-actions cabinet-actions">
               <button type="button" id="logout-button">Выйти</button>
+              <button type="button" id="logout-all-button">Выйти везде</button>
             </div>
           </div>
           <p id="account-error" class="error" role="alert" hidden></p>
         </div>
       </div>
     </div>
-    <script src="/static/app.js"></script>
+    <template id="task-row-template">{{ task_row("", "", false) }}</template>
+    <script src="{{ static_url('app.js') }}"></script>
   </body>
 </html>
