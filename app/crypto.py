@@ -1,14 +1,19 @@
+import binascii
 import hashlib
 import hmac
+import logging
 import os
 import secrets
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.hashes import SHA256
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 _PREFIX = "enc1:"
+UNREADABLE = "[не удалось расшифровать]"
+_log = logging.getLogger(__name__)
 
 
 def _decode_data_key(raw: str) -> bytes:
@@ -57,5 +62,10 @@ def encrypt_text(value: str) -> str:
 def decrypt_text(value: str) -> str:
     if not value.startswith(_PREFIX):
         return value
-    raw = urlsafe_b64decode(value[len(_PREFIX) :] + "=" * (-len(value[len(_PREFIX) :]) % 4))
-    return AESGCM(data_key()).decrypt(raw[:12], raw[12:], None).decode()
+    encoded = value.removeprefix(_PREFIX)
+    try:
+        raw = urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+        return AESGCM(data_key()).decrypt(raw[:12], raw[12:], None).decode()
+    except (InvalidTag, ValueError, binascii.Error):
+        _log.warning("Encrypted value could not be decrypted")
+        return UNREADABLE

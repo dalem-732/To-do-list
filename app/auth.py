@@ -7,17 +7,17 @@ import secrets
 import time
 import uuid
 from base64 import urlsafe_b64decode, urlsafe_b64encode
-from urllib.parse import urlsplit
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.crypto import decrypt_text, encrypt_text, login_lookup
-from app.models import User
+from app.models import User, UserSession
+from app.security import https_enabled
 
 LOGIN_RE = re.compile(r"^[\w]{3,32}$", re.UNICODE)
+SESSION_SECONDS = 14 * 24 * 60 * 60
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
-_SESSION_DAYS = 14
 _SCRYPT = {"n": 2**14, "r": 8, "p": 1, "dklen": 32}
 _FALLBACK_SECRET = secrets.token_hex(32)
 _DUMMY_HASH = None
@@ -104,7 +104,9 @@ def _unsign(token: str | None) -> dict | None:
     padded = body + "=" * (-len(body) % 4)
     try:
         payload = json.loads(urlsafe_b64decode(padded))
-    except (ValueError, json.JSONDecodeError):
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
         return None
     try:
         if int(payload.get("exp", 0)) < time.time():
@@ -114,74 +116,98 @@ def _unsign(token: str | None) -> dict | None:
     return payload
 
 
-def make_session(user_id: uuid.UUID) -> str:
-    return _sign({"uid": str(user_id), "exp": int(time.time()) + _SESSION_DAYS * 24 * 60 * 60})
+def _uuid_field(payload: dict, name: str) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(payload[name]))
+    except (KeyError, ValueError, TypeError):
+        return None
 
 
-def read_session(token: str | None) -> uuid.UUID | None:
-    payload = _unsign(token)
-    if payload is None or "uid" not in payload:
+def start_session(db: Session, user: User) -> str:
+    expires_at = int(time.time()) + SESSION_SECONDS
+    record = UserSession(user_id=user.id, expires_at=expires_at)
+    db.add(record)
+    db.flush()
+    return _sign({"uid": str(user.id), "sid": str(record.id), "sv": user.session_version, "exp": expires_at})
+
+
+def _session_from_request(request, db: Session) -> tuple[User, uuid.UUID | None] | None:
+    payload = _unsign(request.cookies.get("session"))
+    if payload is None:
+        return None
+    user_id = _uuid_field(payload, "uid")
+    if user_id is None:
+        return None
+    user = db.get(User, user_id)
+    if user is None:
         return None
     try:
-        return uuid.UUID(payload["uid"])
-    except (ValueError, TypeError):
+        version = int(payload.get("sv", 0))
+    except (TypeError, ValueError):
         return None
+    if version != user.session_version:
+        return None
+    if "sid" not in payload:
+        return user, None
+    session_id = _uuid_field(payload, "sid")
+    if session_id is None:
+        return None
+    record = db.get(UserSession, session_id)
+    if record is None or record.user_id != user.id or record.expires_at < time.time():
+        return None
+    return user, session_id
+
+
+def user_from_request(request, db: Session) -> User | None:
+    found = _session_from_request(request, db)
+    return found[0] if found else None
+
+
+def end_session(request, db: Session) -> None:
+    found = _session_from_request(request, db)
+    if found is None:
+        return
+    user, session_id = found
+    if session_id is None:
+        user.session_version += 1
+    else:
+        db.execute(delete(UserSession).where(UserSession.id == session_id))
+
+
+def end_all_sessions(db: Session, user: User) -> None:
+    user.session_version += 1
+    db.execute(delete(UserSession).where(UserSession.user_id == user.id))
+
+
+def purge_expired_sessions(db: Session) -> None:
+    db.execute(delete(UserSession).where(UserSession.expires_at < int(time.time())))
 
 
 def make_guest_token(guest_id: uuid.UUID) -> str:
-    return _sign({"gid": str(guest_id), "exp": int(time.time()) + _SESSION_DAYS * 24 * 60 * 60})
+    return _sign({"gid": str(guest_id), "exp": int(time.time()) + SESSION_SECONDS})
 
 
 def read_guest(token: str | None) -> uuid.UUID | None:
     payload = _unsign(token)
-    if payload is None or "gid" not in payload:
+    if payload is None:
         return None
-    try:
-        return uuid.UUID(payload["gid"])
-    except (ValueError, TypeError):
-        return None
+    return _uuid_field(payload, "gid")
 
 
-def user_from_request(request, db: Session) -> User | None:
-    user_id = read_session(request.cookies.get("session"))
-    if user_id is None:
-        return None
-    return db.get(User, user_id)
-
-
-def same_origin(request) -> bool:
-    origin = request.headers.get("origin")
-    if not origin:
-        return request.headers.get("sec-fetch-site", "") != "cross-site"
-    try:
-        origin_host = urlsplit(origin).netloc.casefold()
-    except ValueError:
-        return False
-    expected_host = request.headers.get("host", "").casefold()
-    return bool(origin_host and expected_host) and hmac.compare_digest(origin_host, expected_host)
-
-
-def _secure_cookies() -> bool:
-    configured = os.environ.get("COOKIE_SECURE")
-    if configured is not None:
-        return configured == "1"
-    return os.environ.get("APP_ENV", "").casefold() == "production"
-
-
-def set_session_cookie(response, user_id: uuid.UUID) -> None:
+def set_session_cookie(response, token: str) -> None:
     response.set_cookie(
         "session",
-        make_session(user_id),
-        max_age=_SESSION_DAYS * 24 * 60 * 60,
+        token,
+        max_age=SESSION_SECONDS,
         httponly=True,
         samesite="lax",
-        secure=_secure_cookies(),
+        secure=https_enabled(),
         path="/",
     )
 
 
 def clear_session_cookie(response) -> None:
-    response.delete_cookie("session", path="/")
+    response.delete_cookie("session", path="/", httponly=True, samesite="lax", secure=https_enabled())
 
 
 def guest_id_from_request(request) -> uuid.UUID | None:
@@ -192,9 +218,9 @@ def set_guest_cookie(response, guest_id: uuid.UUID) -> None:
     response.set_cookie(
         "guest",
         make_guest_token(guest_id),
-        max_age=_SESSION_DAYS * 24 * 60 * 60,
+        max_age=SESSION_SECONDS,
         httponly=True,
         samesite="lax",
-        secure=_secure_cookies(),
+        secure=https_enabled(),
         path="/",
     )
